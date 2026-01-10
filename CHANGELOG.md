@@ -2,6 +2,246 @@
 
 Summarizes notable changes to Zeal
 
+## [1.3.5] - 2026/01/09
+
+### New features
+
+* Enhanced /tag with the following updates:
+  - Added new /tag command options to support routing broadcasts over a chat channel
+    - `/tag chat <tag_text>`: broadcasts the tag_text to a set chat channel (like local, rsay, gsay)
+    - `/tag channel <Zt123>`: Broadcast to rsay or gsay (if not in raid) an auto-join channel message
+    - `/tag join <channel>`: Saves and joins channel if channel else joins previously saved channel
+  - Added new filtering and display options in Nameplates Tab and additional commands below:
+    - `/tag filter`: Enables routing of tag messages to the "Zeal Spam" chat filter channel
+      - The "Zeal Spam" chat filter is also color option "28" in Zeal colors
+    - `/tag suppress`: Enables full suppression of tag messages (requires filter on for rsay and gsay)
+    - `/tag prettyprint`: Translates the message into a human friendlier format (requires filter on)
+    - `/tag tooltip`: Shows tag as a target window tooltip with an alignment option
+    - Added option to disable adding the default arrow (adds text only w/out requiring ^-^)
+    - Added option to use '*' instead of '^' for international keyboards
+  - Added two new /tag shapes with single fixed colors:
+    - `^s^`: Red stop sign (octagon)
+    - `^p^`: Green pet paw
+  - Now allows tagging players with shapes using `^R^` commands (text is ignored)
+  - Now supports showing tag and tag shape even if the nameplate text is hidden
+    - Still does not work on mobs w/out nameplates
+  - Modified the text coloring behavior to only override with the Tagged color if no explicit shape set
+  - Added a new `/tag target <text>` that allows targeting NPCs tagged with an
+    exact match for the delimited tag text (case sensitive)
+    - Matches after splitting by delimiter (' | ')
+    - Requires the NPC to be tab targettable to succeed
+    - Targets closest NPC if multiple matches
+  - Updated appending tag text to avoid duplication of exact fields and truncating at field
+    boundaries. A duplicated field will show up at the end.
+
+* Added a new /linkall option that is toggleable with '/linkall compact' (defaults to on) that will collapse identical
+  items into a single link followed by a " (count)" value
+
+* Added a new nameplate options tab checkbox to allow showing healthbars for raid members
+  - Requires the Quarm server to set the new rule to share raid health updates
+  - Healthbar display is now unlinked from the nameplate text visibility
+
+* Added additional '/timestamp 3' option with a 24-hour format HH:MM::SS option.
+
+* Added new zeal general options checkbox to enable per character storing of the chat channels
+   to autojoin (stored as `"ChannelAutoJoin_<name>"` in the client ini)
+
+*  Added per character keybind support
+    - Added new zeal general options tab option to enable per character
+      keybinds. When enabled, these are stored in a new eqclient.ini
+      section called `"Keymaps_<name>"`.
+    - There is no in-game support for duplicating keybinds.  In order to re-use,
+       the contents of one Keymaps ini section can be copy and pasted manually to another.
+
+* Added new /optchat command to optionally broadcast to raid or group without error messages
+  - `/optchat <rs | gs | rsgs> <message>`
+
+* Added a new /triggers command that supports loading a list of  triggers from a specially formatted
+  text file that will match to events in the chat output stream and generate on screen
+  labels with timer countdowns (see repo readme)
+  - This is primitive and not a GINA / eqlogparser replacement
+
+* Updated item display to add case 110 for ranger archery accuracy spell effects
+
+* Added new zeal option 'Log Add to Trade' that will print a chat
+  message when items or coin are added to the trade window to either
+  npcs or players
+  - Note: This does not apply to the world crafting stations
+
+### Infrastructure updates and bug fixes
+* Pet chat fixes:
+  - Moved /pet health summary line routing from My pet channel to  default routing so it gets
+    clustered with the buff report lines
+  - Fixed an issue where a pet name with a space (NPC) was going to other instead of my pet
+
+*  Did some std::string cleanup to make more parameters const refs instead of refs or copies and
+   fixed two cases of debug printfs not properly using .c_str().
+
+* Suppressed the map external data mode complaint about blank lines in map files.
+
+* Added crash logging of nosprites state if showspelleffects is on
+
+* Fixed the nameplate map info cache to properly flush on a despawn
+
+
+## [1.3.4] - 2025/12/11
+
+### New features
+
+* New /spelleffects command adds some visual options:
+  - /spelleffects nosprites: if enabled it disables the sprite effects on the
+    180 spells using old spell effects to prevent the dpvs.dll crash when
+    /showspelleffects is on (not yet 100% broadly confirmed)
+    -  To enable: Execute `/spelleffects nosprites` (confirm this reports True)
+         then `/showspelleffects on` 
+
+  - /spelleffects bard: optionally switches the spell effect on the 14 bard
+    songs (regen/resists) that were invisible with showspelleffects
+    off from a flashy blue cone to more subtle bard effects
+
+* New /tag command features (see readme for examples):
+  - The /tag command now renders an optional arrow above tagged mobs
+  - The arrow color defaults to the nameplate color but can be
+    explicity set using a special `^r^` prefix in the tag_text, where
+    R or r = red, O or o = orange, Y or y = yellow, G or g = green,
+    B or b = blue, W or w = white, and - = delete arrow
+  - The /tag command now supports a special `+` prefix to append
+    text to an existing tag instead of fully replacing it
+  - The /tag command now supports a special `-` prefix to erase
+    any existing tag text. It can be sent by itself to delete the tag
+    text and the tag arrow if it is using the default color.
+
+* Now appending meal/drink durations in item display
+
+### Infrastructure updates and bug fixes
+
+* Autofire fixes:
+  - Re-enabled auto-disabling of auto-attack when enabling autofire
+    (fixes unintentional change in behavior in 1.3.2)
+  - Fixed a bug in /autofire where it was disabling combat music when
+    going directly from autofire to autoattack
+  
+
+
+
+
+## [1.3.3] - 2025/12/6
+
+### New features
+
+* Confirmation dialog box updates
+  - Added a tooltip countdown timer that shows up to the right of
+    a confirmation dialog (if there is a timeout)
+  - Added a new Zeal general option 'Sticky dialog position' that will
+    allow persistent positioning of the in-game confirmation dialogs
+
+* Bazaar quality of life updates
+  - Updated the right click on trader name in bazaar search window to
+    also both target the player and add them as a map marker to make
+    it easier to find traders
+  - Performing a ctrl + shift + left click on a non-empty inv slot
+    while the bazaar search window is open will automatically perform
+    a bazaar search for that slot's item
+
+* Added a new /tag command command that can add a text tag to the 
+  top of a npc nameplate (zeal fonts mode only)
+  - Supports local only or broadcasts through rsay and gsay
+  - Can clear tags locally or broadcast a clear all tags
+  - Must be enabled to receive broadcasts (/tag on with Zeal fonts on)
+  - Tagged nameplaces have a new Zeal color: Tagged - 30
+    - The tag color overrides the con color but the target color
+      will override the tag color
+
+* Added a new Zeal options Buff Click Thru that will make the
+  non-button area of a locked Buff window transparent to mouse clicks
+  - Unlock the window to move it around with left click
+  - Use control + right click to access the context menu (to unlock)
+
+* Zone map updates
+  - Added a new map options checkbox that enables the addition of
+    the current player movement speed to the map (like /loc)
+  - Added a new data mode (Both - No internal POI) that will combine
+    internal map line data with external files
+  - Increased the number of supported external files to 10 (up to _10.txt)
+
+* Spellset cleanups
+  - Make spellset transport spell names more consistent
+    - Fixed mispelled Zepyhr for skyfire
+    - Changed 'the Nexus' and 'the Combines' to remove 'the '
+    - Relabeled Winds of the North and South to Succor: Skyfire and
+      Succor: Emerald Jungle
+    - Relabeled Tishan's and Marker's relocation to Evacuate: Skyfire
+      and Evaluate: Emerald Jungle
+  - Recategorized 'Shroud of Undeath' from Misc to Combat Innates
+
+### Infrastructure updates and bug fixes
+
+* Item display cleanups
+  - Fixed stun duration for spells with level caps. There is a client
+    / server calculation mismatch so now using correct fixed values.
+  - Fixed misspelled invisible in spell effect info
+  - Now calculating the correct total ratio on Bane DMG: lines
+    in item displays
+
+* Implemented some reliability improvements for /clc
+  - Fixed a collision issue when an already STML annotated substring includes a player names
+  - Changes generation of modified string to try and reduce freezes during busy raids
+
+
+## [1.3.2] - 2025/12/1
+
+### New features
+
+* Slash command updates:
+  - Added /dampenlev on or off command to reduce levitation motion
+      - Reduces frequency by 8x and amplitude by 10x
+      - Affects only the player (not other PCs)
+  - Added a /targetprevious command that acts like the toggle last two targets keybind
+  - Added /autofire on and /autofire off for explicit control (vs toggle) w/more status info
+  - `/zeal help` is now alphabetically sorted
+
+* Added two new keybinds
+   - Commands: PetHold: does /pet hold (AA command)
+   - Target: Assist: does /assist
+
+* Modified the character select camera field of view calculation so that 
+   wide aspect ratios (1.8 to 4+) will not chop off the character name and zone
+  - This is only active when zeal camera is enabled
+
+### Infrastructure updates and bug fixes
+
+* Fixed an indexing error in the shift + tab FindPreviousTellWnd() call that can
+  cause a crash
+
+
+## [1.3.1] - 2025/11/24
+
+### Infrastructure updates and bug fixes
+* Tell window cleanups
+  - Fixed tell windows so using the special trigger keys for say ('),
+    emote (:), and chat (;) properly work and do not send those
+    as tells
+  - Fixed an issue where if always chat here was set and a tell was
+    sent then any data in the always chat edit box was also sent to
+    the tell recipient. This is an existing client bug and in order
+    to limit the changes only applied this to tells (tell windows).
+
+* Fixed a crash when using the escape key in the old ui
+
+* Expanded /zeal version to also report the exported version strings
+  from the new versions of eqw.dll and eqgame.dll
+
+* Fixed left mouse pan jump in full screen mode when using the
+  legacy eqw.dll and eqgame.dll
+
+* Tweaked camera fov to be more consistent
+  - Fixed the fov setting to be more consistently applied when
+    in game during zoning and other transitions
+  - Disabled the custom fov setting during character select
+
+* Added a utility function for listing in-use keybind codes
+
+
 ## [1.3.0] - 2025/11/20
 
 The 1.3 release includes some significant refactoring of Zeal to make it more
@@ -9,7 +249,7 @@ robust across login cycles, some minor feature polishing, and a few new quality
 of life features. It also supports the new eqw_takp (eqw.dll) as a replacement
 for the legacy eqw.dll 2.32.
 
-## Feature updates
+### Feature updates
 * The trip from game to character select to login / desktop and relogging back
   into character select should be more reliable
   - Note: dgVoodoo has its own bug on login to char select to login w/out entering world
@@ -68,7 +308,7 @@ for the legacy eqw.dll 2.32.
   - New `/map ring` heading option toggles a directional heading projection line
     as part of the map ring
 
-# Infrastructure updates and bug fixes
+### Infrastructure updates and bug fixes
 
 * Mystats now includes the bonuses from physical enhancement and
   lightning reflex in the avoidance calculation (in addition to combat agility)
@@ -106,7 +346,7 @@ for the legacy eqw.dll 2.32.
 The 1.2 release includes some significant boot stability fixes and a
 number of quality of life enhancements.
 
-## Feature updates
+### Feature updates
 
 * Spellsets
   - Added spellset categorization for the new Druid Zephyr spells
@@ -217,7 +457,7 @@ number of quality of life enhancements.
   - Added the 'You are stunned!' message to the rate limiting
     filter in autofire
 
-## Infrastructure
+### Infrastructure
 
 * Fix to a memory allocation in hook wrapper (boot heap corruption fix)
 

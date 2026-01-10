@@ -4,7 +4,7 @@
 #include <string>
 #include <vector>
 
-#define ZEAL_VERSION "1.3.5-beta0"
+#define ZEAL_VERSION "1.3.5"
 #ifndef ZEAL_BUILD_VERSION               // Set by github actions
 #define ZEAL_BUILD_VERSION "UNOFFICIAL"  // Local build
 #endif
@@ -65,6 +65,7 @@ class ZealService {
   std::unique_ptr<class BuffTimers> buff_timers = nullptr;
   std::unique_ptr<class HelmManager> helm = nullptr;
 
+  std::unique_ptr<class Triggers> triggers = nullptr;
   std::unique_ptr<class TargetRing> target_ring = nullptr;
   std::unique_ptr<class FloatingDamage> floating_damage = nullptr;
 

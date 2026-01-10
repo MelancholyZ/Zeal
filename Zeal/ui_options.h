@@ -41,6 +41,10 @@ class ui_options {
   ZealSetting<bool> setting_escape_raid_lock = {false, "Zeal", "EscapeRaidLock", false};
   ZealSetting<bool> setting_dialog_position = {false, "Zeal", "DialogPosition", false,
                                                [this](const bool &) { SyncDialogPosition(); }};
+  ZealSetting<bool> setting_per_char_keybinds = {false, "Zeal", "PerCharKeybinds", false,
+                                                 [this](const bool &) { SyncKeybinds(); }};
+  ZealSetting<bool> setting_per_char_autojoin = {false, "Zeal", "PerCharAutojoin", false,
+                                                 [this](const bool &) { SyncIniAutojoin(); }};
 
  private:
   void InitUI();
@@ -59,9 +63,12 @@ class ui_options {
   int FindComboIndex(std::string combobox, std::string text_value);
   void UpdateComboBox(const std::string &name, const std::string &label, const std::string &default_label);
   void SyncDialogPosition();
+  void SyncKeybinds();
+  void SyncIniAutojoin();
 
   Zeal::GameUI::SidlWnd *wnd = nullptr;
   std::vector<Zeal::GameUI::BasicWnd *> color_buttons;
   UIManager *const ui;
   std::vector<std::pair<int, std::string>> sound_list;  // WavePlay index table.
+  char ini_autojoin_name[16 + 30 + 2];                  // Space for "ChannelAutoJoin_" + self->name + null.
 };

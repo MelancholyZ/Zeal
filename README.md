@@ -11,7 +11,8 @@ from the repo source, providing full transparency on the release contents.
 ### Installation
 - Download [latest official release](https://github.com/coastalredwood/Zeal/releases/latest) zip
   (not the repo source code zip)
-- Unzip contents to root game directory (not the uifiles/ subfolder).
+- Unzip into a folder and then copy the folder contents to root game directory
+  - The `zeal.asi` file should end up in the root game folder, not a uifiles/ subfolder
 - Test Zeal installation in game by typing "/zeal version" and "/help zeal".
 - Configure Zeal by assigning new key binds and using the new Zeal options window.
 
@@ -20,7 +21,7 @@ To disable Zeal, just delete the zeal.asi file.
 ### Features
 - Camera motion improvements (major improvements to third person view)
 - Additional key binds (tab targeting, corpse cycling, strafe, pet, map,
-  autoinventory, autofire, buy/sell stacks)
+  autoinventory, autofire, buy/sell stacks, per character)
 - Additional commands (melody, autofire, useitem, autoinventory, autobank,
   link all, loot all, raid survey, singleclick, show loot lockouts, etc)
 - Integrated map (see In-game Map section below)
@@ -29,7 +30,7 @@ To disable Zeal, just delete the zeal.asi file.
 - Autostand on move/cast, autosit on camp with export inventory/spellbook option,
   enhanced autorun behavior option
 - Enhanced chat (% replacements, additional filters and colors, tell windows,
-  tab completion, copy and paste)
+  tab completion, copy and paste, per character autojoin channels)
 - Optional enhanced spell info (spells, scrolls, items) on info displays
 - Notification sounds (tells, group invites)
 - Third party tool support (silent log messages, direct ZealPipes)
@@ -185,8 +186,9 @@ ___
   - **Description:** Enables (on) the generation of a consider message when left clicking (like right).
 
 - `/linkall`
-  - **Arguments:** none (pastes into active chat) or `rs` (rsay), `gs` (gsay), `gu` (guildsay), `ooc`, `auc`, `say`
+  - **Arguments:** none (pastes into active chat), `compact`, or `rs` (rsay), `gs` (gsay), `gu` (guildsay), `ooc`, `auc`, `say`
   - **Description:** prints item links if looting window is open. The argument options route directly to channel for macros.
+    The `compact` argument will toggle a setting that collapses duplicate items and appends a `(count)` value to them.
 
 - `/loc noprint`
   - **Description:** adds noprint argument to /loc, this just sends loc directly to your log.
@@ -390,8 +392,9 @@ ___
   - **Description:** holds the last hotbutton pressed down for the duration (decisecond like /pause).
 
 - `/timestamp`
+  - **Arguments:** `0`, `1`, `2`, `3`
   - **Aliases:** `/tms`
-  - **Description:** Shows message timestamps.
+  - **Description:** Shows message timestamps in chat windows.  0: Off, 1: Long [hh:mm:ss tt], 2: Short [HH:mm], 3: Short+Secs [HH:mm:ss]
 
 - `/tooltipall`
   - **Description:** Toggle showing all open containers tooltips when holding alt.
@@ -405,6 +408,10 @@ ___
 - `/trade`
   - **Aliases:** `/opentrade`, `/ot`
   - **Description:** Opens a trade window with your current target.
+
+- `/triggers`
+  - **Description:** Supports very simplistic countdown timers from chat parsing triggers.
+     See the [Triggers](#Triggers) section for more details.
 
 - `/uierrors`
   - **Arguments:** `on`, `off`
@@ -435,7 +442,14 @@ ___
      - enhanced tab completion for /tell, /t, and /consent
 
 ___
-### Key Binds (Added to Options->Keyboard)
+### Key Binds
+
+Per character keybinds are supported through an option in the Zeal General Tab. When enabled the
+keybinds are stored in a `"[Keymaps_<name>]"` section of the client.ini file. Each character starts
+with the default keybinds and Zeal does not support copying keybinds from one profile to another.
+Manual editing of the ini file is required to copy from old section to the new section to reuse binds.
+
+#### Additional available binds Added to Options->Keyboard
 - Cycle through nearest NPCs
 - Cycle through nearest PCs
 - Assist
@@ -502,6 +516,28 @@ ___
 - Can hold Shift (2nd) / Ctrl (3rd) / Shift+Ctrl (4th) to equip the item to alternate slots
   if it can be equipped in several slots in the list.
 
+## Triggers
+- Supports a very simplistic visible timer countdown display based on char parsed trigger events
+  - This is not a replacement for GINA or eqlogparser and is unlikely to be expanded
+- Supports the following commands:
+  - `/triggers on`, `/triggers off`: Enables or disables trigger monitoring. The on reloads the file.
+  - `/triggers load [filename]`: Loads triggers from a file. If filename is blank, uses default
+     per character trigger file (`<name>-Triggers.txt`). If not blank and the load is successful,
+     the filename becomes the new default for the character.
+  - `/triggers clear`: Clears list of active trigger events.
+  - `/triggers list`: Lists the loaded trigger and active events.
+  - `/triggers font <fontname>`: Sets the font to use for events list (default is `arial_12`)
+  - `/triggers position <x> <y>`: Sets the upper left offset of the events list on screen.
+- Triggers file format: Five columns delimited by four `^` symbol
+  - Column 1: "Arm" or "Clear" actions
+  - Column 2: Label for event in display (also used by Clear to Clear an event)
+  - Column 3: Pattern matching expression (c++ std::regex, don't get fancy, no sanitization)
+  - Column 4: Duration in seconds
+  - Column 5: Color in hex ARGB (0xffffffff = white, 0xffff0000 = red)
+ - Example that sets a 60 sec countdown when a charm lands and clears early if breaks:
+   - `Add^Charm^.*'s eyes glaze over.^60^0xff00ff00`
+   - `Clear^Charm^Your charm spell has worn off.^0^0`
+
 ## Nameplate tagging
 - Controlled through either the `/tag` command or Nameplate tab options
 - Requires enabling both Nameplates Zeal fonts and tags (`/tag on`)
@@ -518,7 +554,10 @@ ___
   - The <tag_text> message supports special prefixes:
     - `+` to append tag text (must be first character)
     - `-` to erase only existing text (must be first character)
-    - `^R^`: to set explicit arrow where R = colors (R, O, Y, G, B, W) or `-` to remove arrow
+    - `^?^`: to set explicit shapes over the nametag where `?` can be one of (case-insensitive):
+      - Colored arrow: (`R` = red, `O` = orange, `Y` = yellow, `G` = green, `B` = blue, `W` = white)
+      - Green pet paw symbol: `P`
+      - Red stop sign (octagon): `S`
 - Chat channel support / usage
   - Note: Zeal does not autojoin the channel at boot. Use `/tag channel`, `/tag join`, or autojoin.
   - `/tag channel <name>` broadcasts a special message to rsay (if in raid) else gsay (if in group) 
@@ -533,6 +572,10 @@ ___
     - Enabling prettyprint will disable the badword filter (non-persistently)
 - The tag text of the current target can be added as a tooltip to the target window by 
   setting `/tag tooltip on` (there is also an alignment option in Nameplate tab)
+- Tag text can be used for targeting with `/tag target <text>` where
+  - Matches `<text>` against each tag text field after splitting by delimiter (' | ')
+  - Requires the NPC to be tab targettable to succeed
+  - Targets closest NPC if multiple matches
 - International keyboard support:
   - Nameplate Tab Alternate Symbols options allows `*` in place of `^`.
 

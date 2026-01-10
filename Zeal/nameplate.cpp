@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 
 #include "callbacks.h"
 #include "chat.h"
@@ -34,6 +35,8 @@ static constexpr int kTagChannelJoinPending = -2;
 enum TagArrowColor : DWORD {
   Off = 0,  // Alpha == 0 for these special cases.
   Nameplate = 1,
+  Paw = D3DCOLOR_XRGB(0x20, 0xc0, 0x20),       // Ensure this is unique.
+  StopSign = D3DCOLOR_XRGB(0xf0, 0x00, 0x00),  // Ensure this is unique.
   Red = D3DCOLOR_XRGB(0xff, 0, 0),
   Orange = D3DCOLOR_XRGB(0xff, 0x80, 0),
   Yellow = D3DCOLOR_XRGB(0xff, 0xff, 0),
@@ -66,6 +69,16 @@ static int __fastcall SetNameSpriteState(void *this_display, void *unused_edx, Z
       this_display, unused_edx, entity, show);
 }
 
+// Handles the nameplate update call in the entity destructor.
+static int __fastcall SetNameSpriteState_Destructor(void *this_display, void *unused_edx,
+                                                    Zeal::GameStructures::Entity *entity, int show) {
+  ZealService::get_instance()->nameplate->handle_entity_destructor(entity);
+
+  // Bypass the unnecessary call to our own setnamesprite handler and reroute directly to the client's.
+  return ZealService::get_instance()->hooks->hook_map["SetNameSpriteState"]->original(SetNameSpriteState)(
+      this_display, unused_edx, entity, show);
+}
+
 // Promotes a SetNameSpriteTint call to a SetNameSpriteState call (for faster target updates) if visible.
 static int __fastcall SetNameSpriteTint_UpdateState(void *this_display, void *not_used,
                                                     Zeal::GameStructures::Entity *entity) {
@@ -76,6 +89,12 @@ static int __fastcall SetNameSpriteTint_UpdateState(void *this_display, void *no
     return 1;                                                  // SetNameSpriteTint returns 1 if a tint was applied.
   }
   return SetNameSpriteTint(this_display, not_used, entity);
+}
+
+// Flushes any deleted entities in the info_map cache.
+void NamePlate::handle_entity_destructor(Zeal::GameStructures::Entity *entity) {
+  auto it = nameplate_info_map.find(entity);
+  if (it != nameplate_info_map.end()) nameplate_info_map.erase(it);
 }
 
 bool NamePlate::handle_shownames_command(const std::vector<std::string> &args) {
@@ -121,6 +140,9 @@ NamePlate::NamePlate(ZealService *zeal) {
   zeal->hooks->Add("SetNameSpriteTint", 0x4B114D, SetNameSpriteTint, hook_type_detour);
   zeal->hooks->Add("TargetWnd_PostDraw", 0x005e6f78, TargetWnd_PostDraw, hook_type_vtable);
 
+  // Intercept the call within the entity destructor to properly flush the nameplate_info_map cache.
+  zeal->hooks->Add("SetNameSpriteState_Destructor", 0x0050724c, SetNameSpriteState_Destructor, hook_type_replace_call);
+
   // Replace the tint only updates in RealRender_World with one that also updates the text
   // when there is a change in target. This processing happens shortly after the DoPassageOfTime()
   // processing where it normally happens, but that processing is gated by an update rate.
@@ -165,14 +187,6 @@ NamePlate::NamePlate(ZealService *zeal) {
   zeal->callbacks->AddGeneric([this]() { clean_ui(); }, callback_type::DXReset);  // Just release all resources.
   zeal->callbacks->AddGeneric([this]() { clean_ui(); }, callback_type::DXCleanDevice);
   zeal->callbacks->AddGeneric([this]() { render_ui(); }, callback_type::RenderUI);
-
-  // Ensure our local entity cache is flushed when an entity despawns.
-  zeal->callbacks->AddEntity(
-      [this](struct Zeal::GameStructures::Entity *entity) {
-        auto it = nameplate_info_map.find(entity);
-        if (it != nameplate_info_map.end()) nameplate_info_map.erase(it);
-      },
-      callback_type::EntityDespawn);
 }
 
 NamePlate::~NamePlate() {}
@@ -239,7 +253,13 @@ void NamePlate::parse_args(const std::vector<std::string> &args) {
 }
 
 void NamePlate::dump() const {
-  Zeal::Game::print_chat("Info_map: %d entries", nameplate_info_map.size());
+  int valid_count = 0;
+  for (const auto &[entity, info] : nameplate_info_map) {
+    Zeal::GameStructures::Entity *current_ent = Zeal::Game::get_entity_list();
+    while (current_ent && current_ent != entity) current_ent = current_ent->Next;
+    if (current_ent) valid_count++;
+  }
+  Zeal::Game::print_chat("Info_map: %d entries (%d valid)", nameplate_info_map.size(), valid_count);
   Zeal::Game::print_chat("Tag channel: %s, number: %d", setting_tag_channel.get().c_str(), tag_channel_number);
 }
 
@@ -278,8 +298,9 @@ void NamePlate::clean_ui() {
 static float get_nameplate_z_offset(const Zeal::GameStructures::Entity &entity) { return z_position_offset; }
 
 // The server currently only sends reliable HP updates for target, self, self pet,
-// and group members.  See Mob::SendHPUpdate().
-static bool is_hp_updated(const Zeal::GameStructures::Entity *entity) {
+// and group members unless a quarm specific server rule is set to also send raid members.
+// See Mob::SendHPUpdate().
+bool NamePlate::is_hp_updated(const Zeal::GameStructures::Entity *entity) const {
   if (!entity) return false;
   if (entity->Type != Zeal::GameEnums::EntityTypes::NPC && entity->Type != Zeal::GameEnums::EntityTypes::Player)
     return false;  // No hp bars on corpses.
@@ -293,6 +314,10 @@ static bool is_hp_updated(const Zeal::GameStructures::Entity *entity) {
       if (entity == member) return true;
       if (member && (entity->PetOwnerSpawnId == member->SpawnId)) return true;
     }
+  if (entity->Type == Zeal::GameEnums::EntityTypes::Player && setting_raid_health_bars.get() &&
+      Zeal::Game::RaidInfo->is_in_raid() && is_raid_member(*entity))
+    return true;
+
   return false;
 }
 
@@ -317,6 +342,16 @@ static int get_stamina_percent(const Zeal::GameStructures::Entity *entity) {
     return max(0, min(100, 100 - entity->CharInfo->Stamina));  // 100 = empty, 0 = full.
 
   return -1;  // TODO: Support entities besides self.
+}
+
+// Returns bearing to target from self from -pi to +pi in the world coordinate system.
+static float get_bearing(const Zeal::GameStructures::Entity *self, const Zeal::GameStructures::Entity *target) {
+  if (!self || !target) return 0;
+  float delta_y = target->Position.x - self->Position.x;
+  float delta_x = target->Position.y - self->Position.y;
+  delta_x = (delta_x >= 0) ? (max(delta_x, 1e-6)) : (min(delta_x, -1e-6));
+  float bearing = std::atan2(delta_y, delta_x);  // From -pi to +pi.
+  return bearing;
 }
 
 void NamePlate::render_ui() {
@@ -378,13 +413,17 @@ void NamePlate::render_ui() {
     }
 
     auto nameplate_color = info.color | 0xff000000;
-    sprite_font->queue_string(full_text.c_str(), position, true, nameplate_color);
+    if (!full_text.empty()) sprite_font->queue_string(full_text.c_str(), position, true, nameplate_color);
 
     // If an explicit tag color was set, use that color otherwise use the nameplate color.
     if (!is_corpse && info.tag_color != TagArrowColor::Off) {
       auto tag_color = (info.tag_color == TagArrowColor::Nameplate) ? nameplate_color : info.tag_color;
+      TagArrows::Shape shape = (tag_color == TagArrowColor::Paw)        ? TagArrows::Shape::Paw
+                               : (tag_color == TagArrowColor::StopSign) ? TagArrows::Shape::Octagon
+                                                                        : TagArrows::Shape::Arrow;
       position.z += sprite_font->get_text_height(full_text) + 1.5f;
-      tag_arrows->QueueArrow(position, tag_color);
+      float bearing = (shape == TagArrows::Shape::Arrow) ? 0.0f : get_bearing(self, entity);
+      tag_arrows->QueueTagShape(position, tag_color, shape, bearing);
     }
   }
   tag_arrows->FlushQueueToScreen();
@@ -458,6 +497,9 @@ NamePlate::ColorIndex NamePlate::get_pet_color_index(const Zeal::GameStructures:
   if (entity.PetOwnerSpawnId == Zeal::Game::get_self()->SpawnId)  // Self Pet
     return ColorIndex::Group;                                     // Always a group member.
 
+  auto owner = Zeal::Game::get_entity_by_id(entity.PetOwnerSpawnId);
+  if (!owner || owner->Type != Zeal::GameEnums::Player) return ColorIndex::UseClient;
+
   if (Zeal::Game::GroupInfo->is_in_group()) {
     for (int i = 0; i < GAME_NUM_GROUP_MEMBERS; i++) {
       Zeal::GameStructures::Entity *groupmember = Zeal::Game::GroupInfo->EntityList[i];
@@ -517,7 +559,8 @@ bool NamePlate::handle_SetNameSpriteTint(Zeal::GameStructures::Entity *entity) {
   bool is_target = (entity == Zeal::Game::get_target());
   bool is_corpse = (entity->Type >= Zeal::GameEnums::NPCCorpse);
   auto it = zeal_fonts ? nameplate_info_map.find(entity) : nameplate_info_map.end();
-  if (!is_target && !is_corpse && it != nameplate_info_map.end() && !it->second.tag_text.empty())
+  if (!is_target && !is_corpse && it != nameplate_info_map.end() && !it->second.tag_text.empty() &&
+      (it->second.tag_color == TagArrowColor::Off || it->second.tag_color == TagArrowColor::Nameplate))
     color_index = ColorIndex::Tagged;
 
   auto color = D3DCOLOR_XRGB(128, 255, 255);  // Approximately the default nameplate color.
@@ -711,23 +754,19 @@ bool NamePlate::handle_SetNameSpriteState(void *this_display, Zeal::GameStructur
   if (setting_zeal_fonts.get() &&
       (Zeal::Game::is_in_game() || (setting_char_select.get() && Zeal::Game::is_in_char_select()))) {
     auto it = nameplate_info_map.find(entity);
-    if (!text.empty()) {
-      auto color = Zeal::Game::is_in_char_select() ? D3DCOLOR_XRGB(0xf0, 0xf0, 0x00) : D3DCOLOR_XRGB(0xff, 0xff, 0xff);
-      if (it == nameplate_info_map.end()) {
-        nameplate_info_map[entity] = {.text = text, .tag_text = "", .color = color, .tag_color = TagArrowColor::Off};
-      } else {  // Already exists, so leave tag_text and tag_color untouched.
-        it->second.text = text;
-        it->second.color = color;
-      }
-    } else {
-      if (it != nameplate_info_map.end()) nameplate_info_map.erase(it);
+    auto color = Zeal::Game::is_in_char_select() ? D3DCOLOR_XRGB(0xf0, 0xf0, 0x00) : D3DCOLOR_XRGB(0xff, 0xff, 0xff);
+    if (it == nameplate_info_map.end()) {
+      nameplate_info_map[entity] = {.text = text, .tag_text = "", .color = color, .tag_color = TagArrowColor::Off};
+    } else {  // Already exists, so leave tag_text and tag_color untouched.
+      it->second.text = text;
+      it->second.color = color;
     }
     string_sprite_text = nullptr;  // This disables the client's sprite in call below.
   }
 
   ChangeDagStringSprite(entity->ActorInfo->DagHeadPoint, font_texture, string_sprite_text);
 
-  if (!text.empty()) SetNameSpriteTint(this_display, nullptr, entity);
+  SetNameSpriteTint(this_display, nullptr, entity);
   return true;
 }
 
@@ -762,15 +801,82 @@ static bool is_taggable_target(const Zeal::GameStructures::Entity *target) {
   return true;
 }
 
+// Perform a quick horizontal distance comparison for the target sorting.
+static bool distance_comparison(const Zeal::GameStructures::Entity *a, const Zeal::GameStructures::Entity *b) {
+  auto self = Zeal::Game::get_self();
+  if (!self || !a || !b) return true;  // Default to no change in order.
+
+  float distance_a = (a->Position.x - self->Position.x) * (a->Position.x - self->Position.x) +
+                     (a->Position.y - self->Position.y) * (a->Position.y - self->Position.y);
+  float distance_b = (b->Position.x - self->Position.x) * (b->Position.x - self->Position.x) +
+                     (b->Position.y - self->Position.y) * (b->Position.y - self->Position.y);
+  return distance_a <= distance_b;  // No reason to do the sqrt().
+}
+
+bool NamePlate::handle_tag_target(const std::string &target_text) {
+  // Scan all nameplates for tag_text that contains the target text.
+  std::vector<Zeal::GameStructures::Entity *> matches;
+  for (const auto &entry : nameplate_info_map) {
+    const auto &tag_text = entry.second.tag_text;
+    if (!entry.first || tag_text.empty() || tag_text.find(target_text) == std::string::npos) continue;
+
+    // This sanity check that the entity is valid should not be necessary with the switch to the
+    // SetNameSpriteState_destructor call but adding it out of paranoia against a stale cache.
+    Zeal::GameStructures::Entity *current_ent = Zeal::Game::get_entity_list();
+    while (current_ent && current_ent != entry.first) current_ent = current_ent->Next;
+    if (!current_ent || entry.first->Type != Zeal::GameEnums::NPC) continue;
+
+    // There's a substring match but do a secondary exact check also.
+    auto split = Zeal::String::split_text(tag_text, kDelimiter);
+    if (!split.empty() && !split.back().empty() && split.back().back() == '\n')
+      split.back().erase(split.back().length() - 1);
+    for (const auto &field : split) {
+      if (field == target_text) {
+        matches.push_back(entry.first);
+        break;
+      }
+    }
+  }
+
+  if (matches.empty()) return false;
+
+  // Prevent exploitation by limiting this to entities that can be tab targeted.
+  const float kMaxDist = 250;  // Same distance as tab cycle targeting.
+  auto visible_entities = Zeal::Game::get_world_visible_actor_list(kMaxDist, true);
+  std::vector<Zeal::GameStructures::Entity *> candidates;
+  for (const auto &match : matches) {
+    if (std::find(visible_entities.begin(), visible_entities.end(), match) != visible_entities.end())
+      candidates.push_back(match);
+  }
+
+  if (candidates.empty()) return false;
+  if (candidates.size() > 1) std::sort(candidates.begin(), candidates.end(), distance_comparison);
+  Zeal::Game::set_target(candidates[0]);  // Return closest after sorting by distance.
+  return true;
+}
+
 void NamePlate::handle_tag_command(const std::vector<std::string> &args) {
   if (args.size() == 2 && (args[1] == "on" || args[1] == "off")) {
     enable_tags(args[1] == "on");
     return;
   }
 
+  if (args.size() >= 3 && args[1] == "target") {
+    std::string target_text = args[2];
+    for (int i = 3; i < args.size(); ++i) target_text += " " + args[i];
+    if (!handle_tag_target(target_text)) {
+      Zeal::Game::print_chat("No valid (visible) tag target exact match found.");
+      Zeal::Game::set_target(nullptr);  // Null existing target to make it obvious it failed.
+    }
+    return;
+  }
+
   if (args.size() >= 2 && args[1] == "join") {
     std::string channel = (args.size() == 2) ? setting_tag_channel.get() : args[2];
-    join_tag_channel(channel);
+
+    if (!join_tag_channel(channel))
+      Zeal::Game::print_chat("Invalid chat channel. It must start with %s (like '%s123')", kZealTagChannelPrefix,
+                             kZealTagChannelPrefix);
     return;
   }
 
@@ -872,6 +978,7 @@ void NamePlate::handle_tag_command(const std::vector<std::string> &args) {
 
   Zeal::Game::print_chat("Usage: /tag <on | off | clear>");
   Zeal::Game::print_chat("Usage: /tag <tooltip | filter | suppress | prettyprint> <on | off>");
+  Zeal::Game::print_chat("Usage: /tag target <text_to_match>");
   Zeal::Game::print_chat("Usage: /tag <gsay | rsay | chat> local> <message | clear | channel>");
   Zeal::Game::print_chat("Usage: <message> prefixes: '+' to append, '^R^' or '*R:' for color arrow (R, O, Y, G, B, W)");
   Zeal::Game::print_chat("Example: /tag rsay Assist me");
@@ -896,6 +1003,10 @@ static D3DCOLOR GetTagArrowColor(char color_key) {
       return TagArrowColor::Blue;
     case 'w':
       return TagArrowColor::White;
+    case 'p':
+      return TagArrowColor::Paw;
+    case 's':
+      return TagArrowColor::StopSign;
     default:
       break;
   }
@@ -971,9 +1082,19 @@ bool NamePlate::handle_tag_message(const char *message, bool apply) {
   // We also only allow text tag content on NPCs's.
   if (tag_text.empty() || entity->Type != Zeal::GameEnums::NPC) return true;
 
+  // Check if the tag_text should be appended to existing text. Preserve atomic fields.
   if (append && !it->second.tag_text.empty()) {
-    tag_text = it->second.tag_text.substr(0, it->second.tag_text.size() - 1) + kDelimiter + tag_text;
+    std::string orig_tag_text = tag_text;
+    auto tag_split = Zeal::String::split_text(it->second.tag_text, kDelimiter);
+    if (!tag_split.empty() && !tag_split.back().empty() && tag_split.back().back() == '\n')
+      tag_split.back().erase(tag_split.back().length() - 1);  // Strip trailing \n
+    for (auto it = tag_split.rbegin(); it != tag_split.rend(); ++it) {
+      if (*it == orig_tag_text) continue;  // Skip duplication.
+      if (tag_text.length() + it->length() + strlen(kDelimiter) > kMaxTagTextLength) break;
+      tag_text = *it + kDelimiter + tag_text;  // Only prepend if full split will fit.
+    }
   }
+
   if (tag_text.size() > kMaxTagTextLength) tag_text = tag_text.substr(tag_text.size() - kMaxTagTextLength);
   tag_text += "\n";
 
@@ -1104,7 +1225,12 @@ static std::string prettyprint_tag_message(const std::string &msg) {
   }
 
   if (text.size() > 2 && text[0] == '^') {
-    prefix += std::string("Arrow:") + text[1];
+    if (text[1] == 's' || text[1] == 'S')
+      prefix += "Stop";
+    else if (text[1] == 'p' || text[1] == 'P')
+      prefix += "Paw";
+    else
+      prefix += std::string("Arrow:") + text[1];
     text = text.substr(2);
   }
 
@@ -1179,6 +1305,10 @@ static const char *get_tag_color_description(DWORD color) {
       return "Blue Arrow";
     case TagArrowColor::White:
       return "White Arrow";
+    case TagArrowColor::Paw:
+      return "Paw";
+    case TagArrowColor::StopSign:
+      return "Stop";
     default:
       break;
   }
@@ -1195,7 +1325,13 @@ void NamePlate::handle_targetwnd_postdraw(Zeal::GameUI::SidlWnd *wnd) const {
   const auto it = nameplate_info_map.find(target);
   if (it == nameplate_info_map.end()) return;
   const auto &tag_text = it->second.tag_text;
-  const char *text = tag_text.empty() ? get_tag_color_description(it->second.tag_color) : tag_text.c_str();
+  const char *color_text = get_tag_color_description(it->second.tag_color);
+  const char *text = tag_text.empty() ? color_text : tag_text.c_str();
+  std::string combined_text;
+  if (!tag_text.empty() && color_text && color_text[0]) {
+    combined_text = std::string(color_text) + kDelimiter + tag_text;
+    text = combined_text.c_str();
+  }
   if (!text || !text[0]) return;
 
   // Just bail out if existing tooltip data. This isn't expected so keep it simple.

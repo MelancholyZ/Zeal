@@ -267,20 +267,23 @@ std::string add_class_colors(std::string message, short channel) {
   return result;
 }
 
-std::string generateTimestampedString(const std::string &message, bool longform = true) {
+std::string generateTimestampedString(const std::string &message, int timestamp_style) {
   time_t rawtime;
   struct tm timeinfo;
   time(&rawtime);
   localtime_s(&timeinfo, &rawtime);
 
   std::ostringstream oss;
-  if (longform) {
+  if (timestamp_style == 1) {
     oss << "[" << std::setw(2) << std::setfill('0') << ((timeinfo.tm_hour % 12 == 0) ? 12 : timeinfo.tm_hour % 12)
         << ":" << std::setw(2) << std::setfill('0') << timeinfo.tm_min << ":" << std::setw(2) << std::setfill('0')
         << timeinfo.tm_sec << " " << ((timeinfo.tm_hour >= 12) ? "PM" : "AM") << "] " << message;
-  } else {
+  } else if (timestamp_style == 2) {
     oss << "[" << std::setw(2) << std::setfill('0') << timeinfo.tm_hour << ":" << std::setw(2) << std::setfill('0')
         << timeinfo.tm_min << "] " << message;
+  } else {
+    oss << "[" << std::setw(2) << std::setfill('0') << timeinfo.tm_hour << ":" << std::setw(2) << std::setfill('0')
+        << timeinfo.tm_min << ":" << std::setw(2) << std::setfill('0') << timeinfo.tm_sec << "] " << message;
   }
   return oss.str();
 }
@@ -326,7 +329,7 @@ UINT32 __fastcall GetRGBAFromIndex(int t, int u, USHORT index) {
     case CHANNEL_OTHER_DAMAGE_SHIELD:
       return c->get_color_callback(26);
     case CHANNEL_ZEAL_SPAM:
-      return 0xffd0d0d0;  // Just hard-code to light grey.
+      return c->get_color_callback(27);
     default:
       break;
   }
@@ -357,7 +360,7 @@ static void __fastcall PrintChat(int t, int unused, char *data, short color_inde
   const auto &timestamp_style = ZealService::get_instance()->chat_hook->TimeStampsStyle;
   bool log_is_different = timestamp_style.get() || (chat_buffer != log_buffer);
   if (timestamp_style.get()) {
-    std::string timestamp_buffer = generateTimestampedString(chat_buffer, timestamp_style.get() == 1);
+    std::string timestamp_buffer = generateTimestampedString(chat_buffer, timestamp_style.get());
     strncpy_s(buffer, timestamp_buffer.c_str(), sizeof(buffer));
   } else {
     strncpy_s(buffer, chat_buffer, sizeof(buffer));
@@ -917,16 +920,21 @@ Chat::Chat(ZealService *zeal) {
         return true;  // return true to stop the game from processing any further on this command,
                       // false if you want to just add features to an existing cmd
       });
-  zeal->commands_hook->Add("/timestamp", {"/tms"}, "Toggles timestamps on chat windows.",
-                           [this](std::vector<std::string> &args) {
-                             if (args.size() > 1 && args[1] == "2") {
-                               TimeStampsStyle.set(2);
-                             } else {
-                               TimeStampsStyle.set(TimeStampsStyle.get() > 0 ? 0 : 1);
-                             }
-                             return true;  // return true to stop the game from processing any further on this command,
-                                           // false if you want to just add features to an existing cmd
-                           });
+  zeal->commands_hook->Add(
+      "/timestamp", {"/tms"}, "Toggles/sets timestamps on chat windows: 0:Off, 1:Long, 2:Short, 3:Short+Secs.",
+      [this](std::vector<std::string> &args) {
+        if (args.size() == 2) {
+          int style = 0;
+          if (Zeal::String::tryParse(args[1], &style, true) && style >= 0 && style <= 3) {
+            TimeStampsStyle.set(style);
+            Zeal::Game::print_chat("Timestamps style set to: %d", TimeStampsStyle.get());
+            return true;
+          }
+        }
+        Zeal::Game::print_chat(
+            "Usage: /timestamp <style> where <style> = 0 (Off), 1 (Long), 2 (Short), 3 (Short+Secs)");
+        return true;  // No existing cmd.
+      });
   zeal->commands_hook->Add("/zealinput", {"/zinput"}, "Toggles zeal input which gives you a more modern input feel.",
                            [this](std::vector<std::string> &args) {
                              UseZealInput.toggle();

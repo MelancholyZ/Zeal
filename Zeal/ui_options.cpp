@@ -3,6 +3,7 @@
 #include <array>
 
 #include "assist.h"
+#include "binds.h"
 #include "callbacks.h"
 #include "camera_mods.h"
 #include "chat.h"
@@ -198,7 +199,7 @@ static constexpr std::array<ColorButtonEntry, num_color_buttons> color_button_de
     {"OtherSpecial", D3DCOLOR_XRGB(0xf0, 0xf0, 0xf0)},   // 24: White
     {"OtherCritical", D3DCOLOR_XRGB(0xf0, 0xf0, 0xf0)},  // 25: White
     {"OtherDmgShld", D3DCOLOR_XRGB(0xf0, 0xf0, 0xf0)},   // 26: White
-    {nullptr, D3DCOLOR_XRGB(0xf0, 0xf0, 0xf0)},          // 27: Unused
+    {"ZealSpam", D3DCOLOR_XRGB(0xd0, 0xd0, 0xd0)},       // 27: Light Grey
     {nullptr, D3DCOLOR_XRGB(0xf0, 0xf0, 0xf0)},          // 28: Unused
     {"Tagged", D3DCOLOR_XRGB(0xff, 0x80, 0xf0)},         // 29: Orange
     {"GuildLFG", D3DCOLOR_XRGB(0xcf, 0xff, 0x00)},       // 30: Yellow
@@ -327,6 +328,13 @@ void ui_options::InitGeneral() {
                           [this](Zeal::GameUI::BasicWnd *wnd) { setting_escape_raid_lock.set(wnd->Checked); });
   ui->AddCheckboxCallback(wnd, "Zeal_DialogPosition",
                           [this](Zeal::GameUI::BasicWnd *wnd) { setting_dialog_position.set(wnd->Checked); });
+  ui->AddCheckboxCallback(wnd, "Zeal_PerCharKeybinds",
+                          [this](Zeal::GameUI::BasicWnd *wnd) { setting_per_char_keybinds.set(wnd->Checked); });
+  ui->AddCheckboxCallback(wnd, "Zeal_PerCharAutojoin",
+                          [this](Zeal::GameUI::BasicWnd *wnd) { setting_per_char_autojoin.set(wnd->Checked); });
+  ui->AddCheckboxCallback(wnd, "Zeal_LogAddToTrade", [](Zeal::GameUI::BasicWnd *wnd) {
+    ZealService::get_instance()->give->setting_log_add_to_trade.set(wnd->Checked);
+  });
   ui->AddCheckboxCallback(wnd, "Zeal_ShowHelm", [](Zeal::GameUI::BasicWnd *wnd) {
     ZealService::get_instance()->helm->ShowHelmEnabled.set(wnd->Checked);
   });
@@ -809,6 +817,9 @@ void ui_options::InitNameplate() {
   ui->AddCheckboxCallback(wnd, "Zeal_NameplateHealthBars", [](Zeal::GameUI::BasicWnd *wnd) {
     ZealService::get_instance()->nameplate->setting_health_bars.set(wnd->Checked);
   });
+  ui->AddCheckboxCallback(wnd, "Zeal_NameplateRaidHealthBars", [](Zeal::GameUI::BasicWnd *wnd) {
+    ZealService::get_instance()->nameplate->setting_raid_health_bars.set(wnd->Checked);
+  });
   ui->AddCheckboxCallback(wnd, "Zeal_NameplateManaBars", [](Zeal::GameUI::BasicWnd *wnd) {
     ZealService::get_instance()->nameplate->setting_mana_bars.set(wnd->Checked);
   });
@@ -948,6 +959,9 @@ void ui_options::UpdateOptionsGeneral() {
   ui->SetChecked("Zeal_Escape", setting_escape.get());
   ui->SetChecked("Zeal_RaidEscapeLock", setting_escape_raid_lock.get());
   ui->SetChecked("Zeal_DialogPosition", setting_dialog_position.get());
+  ui->SetChecked("Zeal_PerCharKeybinds", setting_per_char_keybinds.get());
+  ui->SetChecked("Zeal_PerCharAutojoin", setting_per_char_autojoin.get());
+  ui->SetChecked("Zeal_LogAddToTrade", ZealService::get_instance()->give->setting_log_add_to_trade.get());
   ui->SetChecked("Zeal_ShowHelm", ZealService::get_instance()->helm->ShowHelmEnabled.get());
   ui->SetChecked("Zeal_AltContainerTooltips", ZealService::get_instance()->tooltips->all_containers.get());
   ui->SetChecked("Zeal_SpellbookAutoStand", ZealService::get_instance()->movement->SpellBookAutoStand.get());
@@ -1085,6 +1099,8 @@ void ui_options::UpdateOptionsNameplate() {
   ui->SetChecked("Zeal_NameplateZealFonts", ZealService::get_instance()->nameplate->setting_zeal_fonts.get());
   ui->SetChecked("Zeal_NameplateDropShadow", ZealService::get_instance()->nameplate->setting_drop_shadow.get());
   ui->SetChecked("Zeal_NameplateHealthBars", ZealService::get_instance()->nameplate->setting_health_bars.get());
+  ui->SetChecked("Zeal_NameplateRaidHealthBars",
+                 ZealService::get_instance()->nameplate->setting_raid_health_bars.get());
   ui->SetChecked("Zeal_NameplateManaBars", ZealService::get_instance()->nameplate->setting_mana_bars.get());
   ui->SetChecked("Zeal_NameplateStaminaBars", ZealService::get_instance()->nameplate->setting_stamina_bars.get());
   ui->SetChecked("Zeal_TagEnable", ZealService::get_instance()->nameplate->setting_tag_enable.get());
@@ -1334,6 +1350,24 @@ static int __fastcall SidlScreenWndHandleRButtonDown(Zeal::GameUI::SidlWnd *wnd,
       SidlScreenWndHandleRButtonDown)(wnd, unused_edx, mouse_x, mouse_y, unknown3);
 }
 
+// Applies the per character keybind setting to the low level binds module and also handles triggering
+// the immediate full reload if this is triggered in game.
+void ui_options::SyncKeybinds() {
+  ZealService::get_instance()->binds_hook->set_per_character_mode(setting_per_char_keybinds.get());
+}
+
+// Updates the ini section name of the autojoin channels to optionally be per character. This call
+// happens in the GAMESTATE_ENTERWORLD state when the settings are re-applied while the client performs
+// the autojoin in the chat server processing at the start of the mainloop in GAMESTATE_INGAME.
+void ui_options::SyncIniAutojoin() {
+  strcpy_s(ini_autojoin_name, sizeof(ini_autojoin_name), "ChannelAutoJoin");  // Start with default ini name.
+  auto self = Zeal::Game::get_self();  // Charinfo is not yet populated with a name so use self.
+  if (self && self->Name[0] && setting_per_char_autojoin.get()) {
+    std::string name = std::string("ChannelAutoJoin_") + self->Name;
+    if (name.length() < sizeof(ini_autojoin_name)) strcpy_s(ini_autojoin_name, sizeof(ini_autojoin_name), name.c_str());
+  }
+}
+
 // Disables centering of the confirmation dialog window if enabled.
 static void __fastcall CConfirmationDialog_Center(Zeal::GameUI::CConfirmationDialog *dialog, int unused_edx) {
   auto zeal = ZealService::get_instance();
@@ -1464,6 +1498,10 @@ ui_options::ui_options(ZealService *zeal, UIManager *mgr) : ui(mgr) {
       return handle_animation_packet(reinterpret_cast<Zeal::Packets::Animation_Struct *>(buffer));
     return false;  // continue processing
   });
+
+  SyncIniAutojoin();                                // Initialize ini_autojoin_name to a valid field name.
+  mem::write(0x0050009e, (int)&ini_autojoin_name);  // Point to our copy of the autojoin field name in the write ini.
+  mem::write(0x00524919, (int)&ini_autojoin_name);  // Point to our copy of the autojoin field name in the read ini.
 }
 
 ui_options::~ui_options() {}
